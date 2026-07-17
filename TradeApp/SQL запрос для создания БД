@@ -1,0 +1,46 @@
+-- ============================================================================
+-- Скрипт развертывания структуры БД для приложения "Личные финансы"
+-- Архитектура: Categories (1:N) ExpenseItems (1:N) Transactions
+-- ============================================================================
+
+CREATE DATABASE FinanceTracker;
+GO
+USE FinanceTracker;
+GO
+
+-- 1. Таблица Категорий расходов (ТЗ: Название, Месячный бюджет, Флаг активности)
+CREATE TABLE Categories (
+    CategoryID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    MonthlyBudget DECIMAL(18, 2) NOT NULL CHECK (MonthlyBudget >= 0),
+    IsActive BIT DEFAULT 1 NOT NULL
+);
+GO
+
+-- 2. Таблица Статей расходов (ТЗ: Название, Ссылка на категорию, Флаг активности)
+CREATE TABLE ExpenseItems (
+    ExpenseItemID INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(150) NOT NULL,
+    CategoryID INT NOT NULL,
+    IsActive BIT DEFAULT 1 NOT NULL,
+    FOREIGN KEY (CategoryID) REFERENCES Categories(CategoryID)
+);
+GO
+
+-- 3. Таблица Факт совершения расхода (ТЗ: Дата без времени, Положительная сумма, Комментарий)
+CREATE TABLE Transactions (
+    TransactionID INT IDENTITY(1,1) PRIMARY KEY,
+    TransactionDate DATE NOT NULL DEFAULT CAST(GETDATE() AS DATE), -- Только дата, без учета времени
+    Amount DECIMAL(18, 2) NOT NULL CHECK (Amount > 0),            -- Сумма строго больше нуля
+    Comment NVARCHAR(255) NULL,
+    ExpenseItemID INT NOT NULL,
+    FOREIGN KEY (ExpenseItemID) REFERENCES ExpenseItems(ExpenseItemID)
+);
+GO
+
+-- ============================================================================
+-- Индексы для оптимизации выборок по датам и внешним ключам
+-- ============================================================================
+CREATE INDEX IX_Transactions_Date ON Transactions(TransactionDate);
+CREATE INDEX IX_ExpenseItems_Category ON ExpenseItems(CategoryID);
+GO
