@@ -1,0 +1,269 @@
+﻿@page "/"
+@inject TradeApp.Data.FinanceDbContext Db
+@using Microsoft.EntityFrameworkCore
+@rendermode InteractiveServer
+
+<PageTitle>Личные финансы и бюджетирование</PageTitle>
+
+<style>
+    .custom-info-btn {
+        color: #0dcaf0 !important;
+        border-color: #0dcaf0 !important;
+    }
+    .custom-info-btn:hover {
+        color: #ffffff !important;
+        background-color: #0dcaf0 !important;
+    }
+</style>
+
+@if (ActiveItems == null || DisplayedTransactions == null || AllCategories == null || AllExpenseItems == null)
+{
+    <div class="container mt-4 text-center">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-muted">Загрузка модулей финансового учета из СУБД...</p>
+    </div>
+}
+else
+{
+    <div class="container-fluid mt-4" style="font-family: Arial, sans-serif;">
+        <h1 class="mb-4 text-primary fw-bold">Учет личных расходов и бюджетирование</h1>
+
+        <div class="row">
+            <!-- ЛЕВАЯ КОЛОНКА: СТИКЕР, ФИЛЬТРЫ И ТАБЛИЦА ТРАНЗАКЦИЙ -->
+            <div class="col-lg-7 mb-4">
+                <div class="card p-3 mb-3 shadow-sm border-0 bg-white rounded-3">
+                    <h5 class="fw-bold text-secondary">Фильтрация и мониторинг расходов</h5>
+                    <div class="row g-3 align-items-center mt-1">
+                        <div class="col-auto">
+                            <label class="form-label mb-1 text-muted small fw-semibold">Выбор дня из календаря:</label>
+                            <input type="date" class="form-control" @bind-value="SelectedDate" @bind-value:after="OnDateChanged" />
+                        </div>
+                        <div class="col-auto mt-4">
+                            <span class="badge p-3 fs-6 rounded-3 shadow-sm @StickerClass">
+                                @StickerText (Всего: @DayTotal руб.)
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <button class="btn btn-outline-primary btn-sm me-2 fw-semibold" @onclick="LoadAllTransactions">За все время</button>
+                        <button class="btn btn-outline-secondary btn-sm me-2 fw-semibold" @onclick="LoadCurrentDayTransactions">За выбранный день</button>
+                        <button class="btn btn-outline-info bg-white btn-sm fw-semibold custom-info-btn" @onclick="LoadCurrentMonthTransactions">За текущий месяц</button>
+                    </div>
+                </div>
+
+                <!-- Таблица транзакций -->
+                <div class="card p-3 shadow-sm border-0 bg-white rounded-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h5 class="fw-bold text-secondary m-0">Список транзакций (@FilterTitle)</h5>
+                        <div class="d-flex align-items-center">
+                            <span class="small text-muted me-2 text-nowrap">Сортировка:</span>
+                            <select class="form-select form-select-sm" @bind="CurrentSortMode" @bind:after="ApplyTransactionSort">
+                                <option value="DateDesc">По дате (сначала новые)</option>
+                                <option value="CategoryAsc">По категориям (А-Я)</option>
+                                <option value="AmountDesc">По сумме (сначала крупные)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Дата</th>
+                                    <th>Категория / Статья</th>
+                                    <th>Сумма</th>
+                                    <th>Комментарий</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var tx in DisplayedTransactions)
+                                {
+                                    <tr>
+                                        <td class="text-nowrap">@tx.TransactionDate.ToString("dd.MM.yyyy")</td>
+                                        <td>
+                                            <span class="badge bg-light text-primary border me-1 small">@(tx.ExpenseItem?.Category?.Name ?? "Без категории")</span>
+                                            <span class="fw-semibold text-dark">@(tx.ExpenseItem?.Name ?? "Неизвестная статья")</span>
+                                            @if (tx.ExpenseItem != null && !tx.ExpenseItem.IsActive)
+                                            {
+                                                <span class="badge bg-secondary ms-2 xsmall">Архивная</span>
+                                            }
+                                        </td>
+                                        <td class="fw-bold text-danger text-nowrap">- @tx.Amount.ToString("N2") руб.</td>
+                                        <td class="text-muted italic small">@tx.Comment</td>
+                                    </tr>
+                                }
+                                @if (!DisplayedTransactions.Any())
+                                {
+                                    <tr><td colspan="4" class="text-center text-muted py-4">Транзакций за этот период не найдено</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ПРАВАЯ КОЛОНКА: УПРАВЛЕНИЕ С КОРРЕТНОЙ ПРИВЯЗКОЙ ДЛЯ РАСКРЫТИЯ ВКЛАДОК -->
+            <div class="col-lg-5">
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="alert alert-danger p-2 small mb-3 shadow-sm">@ErrorMessage</div>
+                }
+                @if (SuccessMessage)
+                {
+                    <div class="alert alert-success p-2 small mb-3 shadow-sm">Операция успешно выполнена!</div>
+                }
+
+                <div class="accordion shadow-sm rounded-3 overflow-hidden" id="adminAccordion">
+                    
+                    <!-- ВКЛАДКА 1: ТРАНЗАКЦИИ -->
+                    <div class="accordion-item border-0 mb-2 rounded-3 overflow-hidden">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button fw-bold text-success @(ActiveTab == 1 ? "" : "collapsed")" type="button" @onclick="() => ToggleTab(1)">
+                                💸 Ввод новой транзакции (расхода)
+                            </button>
+                        </h2>
+                        <div class="accordion-collapse collapse @(ActiveTab == 1 ? "show" : "")">
+                            <div class="accordion-body bg-white">
+                                <EditForm Model="NewTx" OnValidSubmit="HandleAddTransaction">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold small mb-1">Статья расхода:</label>
+                                        <select class="form-select" @bind="NewTx.ExpenseItemID" required>
+                                            <option value="0">-- Выберите статью --</option>
+                                            @foreach (var item in ActiveItems)
+                                            {
+                                                <option value="@item.ExpenseItemID">@item.Name (@(item.Category?.Name))</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold small mb-1">Сумма (руб):</label>
+                                        <input type="number" step="0.01" class="form-control" @bind-value="NewTx.Amount" required />
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold small mb-1">Дата:</label>
+                                        <input type="date" class="form-control" @bind-value="NewTx.TransactionDate" required />
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold small mb-1">Комментарий:</label>
+                                        <input type="text" class="form-control" @bind-value="NewTx.Comment" placeholder="Купил продукты" />
+                                    </div>
+                                    <button type="submit" class="btn btn-success w-100 fw-bold">Зафиксировать трату</button>
+                                </EditForm>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ВКЛАДКА 2: УЧЕТ СТАТЕЙ РАСХОДОВ (CRUD) -->
+                    <div class="accordion-item border-0 mb-2 rounded-3 overflow-hidden">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button fw-bold text-primary @(ActiveTab == 2 ? "" : "collapsed")" type="button" @onclick="() => ToggleTab(2)">
+                                📝 Учет статей расходов (CRUD)
+                            </button>
+                        </h2>
+                        <div class="accordion-collapse collapse @(ActiveTab == 2 ? "show" : "")">
+                            <div class="accordion-body bg-white" style="max-height: 500px; overflow-y: auto;">
+                                <h6 class="fw-bold text-muted border-bottom pb-1 small">Создать / Изменить статью</h6>
+                                <div class="bg-light p-3 rounded-3 mb-3 border">
+                                    <div class="mb-2">
+                                        <label class="small fw-semibold mb-1">Название статьи:</label>
+                                        <input type="text" class="form-control form-control-sm" @bind="ItemForm.Name" placeholder="Обед в столовой" required />
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="small fw-semibold mb-1">Категория:</label>
+                                        <select class="form-select form-select-sm" @bind="ItemForm.CategoryID" required>
+                                            <option value="0">-- Выберите категорию --</option>
+                                            @foreach (var c in AllCategories)
+                                            {
+                                                <option value="@c.CategoryID">@c.Name</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" id="itemActiveSwitch" @bind="ItemForm.IsActive" />
+                                        <label class="form-check-label small" for="itemActiveSwitch">Статья активна (используется в текущий момент)</label>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-primary btn-sm w-100 fw-bold" @onclick="SaveExpenseItem">Сохранить</button>
+                                        @if (ItemForm.ExpenseItemID != 0)
+                                        {
+                                            <button class="btn btn-secondary btn-sm" @onclick="CancelItemEdit">Отмена</button>
+                                        }
+                                    </div>
+                                </div>
+
+                                <h6 class="fw-bold text-muted small mb-2">Текущие статьи в СУБД:</h6>
+                                <ul class="list-group list-group-flush border rounded-3">
+                                    @foreach (var item in AllExpenseItems)
+                                    {
+                                        <li class="list-group-item d-flex justify-content-between align-items-center p-2 small">
+                                            <div>
+                                                <span class="fw-bold text-dark">@item.Name</span> <br />
+                                                <span class="text-muted xsmall">Кат: @(item.Category?.Name ?? "Нет") | Активна: @(item.IsActive ? "Да" : "Нет")</span>
+                                            </div>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-secondary p-1" title="Редактировать" @onclick="() => EditExpenseItem(item)">✏️</button>
+                                                <button class="btn btn-outline-danger p-1" title="Удалить" @onclick="() => DeleteExpenseItem(item.ExpenseItemID)">❌</button>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ВКЛАДКА 3: УЧЕТ КАТЕГОРИЙ РАСХОДОВ -->
+                    <div class="accordion-item border-0 mb-2 rounded-3 overflow-hidden">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button fw-bold text-dark @(ActiveTab == 3 ? "" : "collapsed")" type="button" @onclick="() => ToggleTab(3)">
+                                🗂 Учет категорий расходов (CRUD)
+                            </button>
+                        </h2>
+                        <div class="accordion-collapse collapse @(ActiveTab == 3 ? "show" : "")">
+                            <div class="accordion-body bg-white" style="max-height: 450px; overflow-y: auto;">
+                                <h6 class="fw-bold text-muted border-bottom pb-1 small">Создать / Изменить категорию трат</h6>
+                                <div class="bg-light p-3 rounded-3 mb-3 border">
+                                    <div class="mb-2">
+                                        <label class="small fw-semibold mb-1">Название категории:</label>
+                                        <input type="text" class="form-control form-control-sm" @bind="CategoryForm.Name" placeholder="Например: Кафе и рестораны" required />
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="small fw-semibold mb-1">Месячный бюджет (руб):</label>
+                                        <input type="number" step="100" class="form-control form-control-sm" @bind="CategoryForm.MonthlyBudget" placeholder="0" required />
+                                    </div>
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" id="catActiveSwitch" @bind="CategoryForm.IsActive" />
+                                        <label class="form-check-label small" for="catActiveSwitch">Категория активна (учитывается в бюджетировании)</label>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-dark btn-sm w-100 fw-bold" @onclick="SaveCategory">Сохранить</button>
+                                        @if (CategoryForm.CategoryID != 0)
+                                        {
+                                            <button class="btn btn-secondary btn-sm" @onclick="CancelCategoryEdit">Отмена</button>
+                                        }
+                                    </div>
+                                </div>
+
+                                <h6 class="fw-bold text-muted small mb-2">Текущие категории в СУБД:</h6>
+                                <ul class="list-group list-group-flush border rounded-3">
+                                    @foreach (var c in AllCategories)
+                                    {
+                                        <li class="list-group-item d-flex justify-content-between align-items-center p-2 small">
+                                            <div>
+                                                <span class="fw-bold text-primary">@c.Name</span> <br />
+                                                <span class="text-muted xsmall">Лимит: @c.MonthlyBudget.ToString("N0") руб. | Активна: @(c.IsActive ? "Да" : "Нет")</span>
+                                            </div>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-secondary p-1" title="Редактировать" @onclick="() => EditCategory(c)">✏️</button>
+                                                <button class="btn btn-outline-danger p-1" title="Удалить" @onclick="() => DeleteCategory(c.CategoryID)">❌</button>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+}
