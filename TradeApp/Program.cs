@@ -4,6 +4,40 @@ using TradeApp.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 1. Включаем поддержку обычных контроллеров API и генератора Swagger
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApi();
+
+// Добавление служб Blazor (ваш старый код)
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+// Регистрация нашей базы данных (ваш старый код)
+builder.Services.AddDbContext<FinanceDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+var app = builder.Build();
+
+// 2. Включаем сам Swagger в режиме разработки (строго перед app.Run())
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi(); // Создает интерактивную страницу со списком запросов
+}
+
+app.UseHttpsRedirection();
+app.UseAntiforgery();
+app.MapStaticAssets();
+
+// Включаем маршрутизацию для контроллеров API
+app.MapControllers(); 
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+app.Run();
+
+
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -12,7 +46,6 @@ builder.Services.AddRazorComponents()
 builder.Services.AddDbContext<FinanceDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-var app = builder.Build();
 
 
 if (!app.Environment.IsDevelopment())
